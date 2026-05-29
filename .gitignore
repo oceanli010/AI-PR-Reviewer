@@ -1,0 +1,55 @@
+# Build directories
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.vcxproj.filters
+
+# Dependencies
+vcpkg_installed/
+packages/
+
+# Output
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+CTestTestfile.cmake
+CMakeUserPresets.json
+
+# Configuration with secrets
+config.yaml
+
+# Reports
+*.html
+!templates/report.html
+
+# Temp
+*.tmp
+*.log
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Package
+CPackConfig.cmake
+CPackSourceConfig.cmake
+_CPack_Packages/

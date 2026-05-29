@@ -1,0 +1,32 @@
+# ============================================================================
+# AI PR Reviewer - Example Configuration
+# ============================================================================
+# Copy this file to config.yaml and fill in your values.
+# CLI arguments and environment variables take precedence over this file.
+
+# --- OpenAI API Configuration ---
+openai:
+  api_key: ""                     # Or set OPENAI_API_KEY environment variable
+  model: "gpt-4o"                 # gpt-4o, gpt-4-turbo, gpt-4, gpt-3.5-turbo
+  base_url: "https://api.openai.com/v1"
+  temperature: 0.3                # 0.0 = deterministic, 1.0 = creative
+  max_tokens: 4096
+  timeout_seconds: 120
+
+# --- GitHub Configuration ---
+github:
+  token: ""                       # Optional: increases API rate limit from 60 to 5000 req/h
+                                  # Or set GITHUB_TOKEN environment variable
+
+# --- Output Configuration ---
+output:
+  path: "review-report.html"      # Default output file path
+  template: ""                    # Custom HTML template path (leave empty for built-in)
+
+# --- Runtime Options ---
+runtime:
+  retry_count: 3                  # Number of retries for API calls
+  retry_delay_ms: 1000            # Delay between retries (milliseconds)
+  max_files_per_batch: 10         # Max files per AI analysis batch
+  verbose: false
+  quiet: false
