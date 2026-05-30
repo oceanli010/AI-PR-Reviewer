@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <regex>
 #include <ctime>
 
 namespace ai_pr_reviewer {
@@ -59,16 +60,16 @@ void HtmlReportGenerator::load_template() {
 // Render
 // ============================================================================
 std::string HtmlReportGenerator::render(const PrMetadata& pr_meta,
-                                          const ReviewResult& result) {
+                                          const ReviewResult& result,
+                                          const std::vector<FileChange>* file_changes) {
     if (!template_loaded_) {
         load_template();
     }
 
-    nlohmann::json data = build_template_data(pr_meta, result);
+    nlohmann::json data = build_template_data(pr_meta, result, file_changes);
 
     try {
         inja::Environment env;
-        // Disable auto-escaping for HTML (we handle escaping ourselves)
         env.set_trim_blocks(true);
         env.set_lstrip_blocks(true);
 
@@ -89,8 +90,17 @@ std::string HtmlReportGenerator::render(const PrMetadata& pr_meta,
 bool HtmlReportGenerator::generate_report(const PrMetadata& pr_meta,
                                             const ReviewResult& result,
                                             const std::string& output_path) {
+    return generate_report(pr_meta, result, {}, output_path);
+}
+
+bool HtmlReportGenerator::generate_report(const PrMetadata& pr_meta,
+                                            const ReviewResult& result,
+                                            const std::vector<FileChange>& file_changes,
+                                            const std::string& output_path) {
     try {
-        std::string html = render(pr_meta, result);
+        const std::vector<FileChange>* fc_ptr =
+            file_changes.empty() ? nullptr : &file_changes;
+        std::string html = render(pr_meta, result, fc_ptr);
 
         std::ofstream output(output_path, std::ios::out | std::ios::binary);
         if (!output.is_open()) {
@@ -113,7 +123,8 @@ bool HtmlReportGenerator::generate_report(const PrMetadata& pr_meta,
 // Template Data Building
 // ============================================================================
 nlohmann::json HtmlReportGenerator::build_template_data(const PrMetadata& pr_meta,
-                                                          const ReviewResult& result) {
+                                                          const ReviewResult& result,
+                                                          const std::vector<FileChange>* file_changes) {
     nlohmann::json data;
 
     // PR metadata
@@ -121,7 +132,11 @@ nlohmann::json HtmlReportGenerator::build_template_data(const PrMetadata& pr_met
     data["pr_number"] = pr_meta.number;
     data["pr_author"] = escape_html(pr_meta.author);
     data["pr_author_avatar"] = pr_meta.author_avatar;
-    data["pr_description"] = escape_html(pr_meta.description);
+    // Convert Markdown PR description to HTML for proper rendering
+    data["pr_description"] = pr_meta.description.empty()
+        ? "" : markdown_to_html(pr_meta.description);
+    data["pr_description_raw"] = escape_html(pr_meta.description);
+    data["has_description"] = !pr_meta.description.empty();
     data["pr_url"] = pr_meta.html_url;
     data["pr_created"] = pr_meta.created_at;
     data["pr_updated"] = pr_meta.updated_at;
@@ -165,6 +180,14 @@ nlohmann::json HtmlReportGenerator::build_template_data(const PrMetadata& pr_met
         item_json["suggestion"] = escape_html(item.suggestion);
         item_json["code_snippet"] = escape_html(item.code_snippet);
         data["risk_items"].push_back(item_json);
+    }
+
+    // File changes diff data for code changes section
+    if (file_changes && !file_changes->empty()) {
+        data["has_diff_data"] = true;
+        data["diff_files"] = build_diff_data(*file_changes);
+    } else {
+        data["has_diff_data"] = false;
     }
 
     return data;
@@ -217,7 +240,6 @@ std::string HtmlReportGenerator::escape_html(const std::string& text) {
             case '>':  escaped += "&gt;";   break;
             case '"':  escaped += "&quot;"; break;
             case '\'': escaped += "&#39;";  break;
-            case '\n': escaped += "\\n";    break;
             default:   escaped += c;        break;
         }
     }
@@ -226,10 +248,199 @@ std::string HtmlReportGenerator::escape_html(const std::string& text) {
 }
 
 // ============================================================================
+// Markdown to HTML (basic conversion for PR descriptions)
+// ============================================================================
+std::string HtmlReportGenerator::markdown_to_html(const std::string& md) {
+    if (md.empty()) return "";
+
+    std::string result;
+    result.reserve(md.size() * 2);
+    bool in_paragraph = false;
+    bool in_code_block = false;
+    bool in_list = false;
+
+    auto close_paragraph = [&]() {
+        if (in_paragraph) { result += "</p>\n"; in_paragraph = false; }
+    };
+    auto close_list = [&]() {
+        if (in_list) { result += "</ul>\n"; in_list = false; }
+    };
+
+    std::istringstream stream(md);
+    std::string line;
+    while (std::getline(stream, line)) {
+        // Trim trailing \r
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+
+        // Code block toggle
+        if (line.size() >= 3 && line.substr(0, 3) == "```") {
+            close_paragraph();
+            close_list();
+            if (in_code_block) {
+                result += "</code></pre>\n";
+                in_code_block = false;
+            } else {
+                result += "<pre><code>";
+                in_code_block = true;
+            }
+            continue;
+        }
+
+        if (in_code_block) {
+            result += escape_html(line) + "\n";
+            continue;
+        }
+
+        // Empty line: close paragraph
+        if (line.empty()) {
+            close_paragraph();
+            result += "\n";
+            continue;
+        }
+
+        // Headings: # ## ###
+        if (line[0] == '#' && line.size() > 1 && line[1] == ' ') {
+            close_paragraph();
+            close_list();
+            size_t level = 1;
+            while (level < line.size() && line[level] == '#') level++;
+            if (level < line.size() && line[level] == ' ') level++;
+            size_t h_level = std::min(level > 2 ? level - 1 : level, size_t(6));
+            if (h_level < 3) h_level = 3;
+            std::string content = escape_html(line.substr(level));
+            result += "<h" + std::to_string(h_level) + ">" + content + "</h" + std::to_string(h_level) + ">\n";
+            continue;
+        }
+
+        // Unordered list: - or *
+        if ((line[0] == '-' || line[0] == '*') && line.size() > 1 && line[1] == ' ') {
+            close_paragraph();
+            if (!in_list) { result += "<ul>\n"; in_list = true; }
+            std::string content = line.substr(2);
+            // Inline formatting
+            content = escape_html(content);
+            // **bold**
+            std::regex bold(R"(\*\*(.+?)\*\*)");
+            content = std::regex_replace(content, bold, "<strong>$1</strong>");
+            // `code`
+            std::regex code(R"(`(.+?)`)");
+            content = std::regex_replace(content, code, "<code>$1</code>");
+            // [link](url)
+            std::regex link(R"(\[([^\]]+)\]\(([^)]+)\))");
+            content = std::regex_replace(content, link, "<a href=\"$2\">$1</a>");
+            result += "<li>" + content + "</li>\n";
+            continue;
+        }
+
+        // Regular paragraph text
+        close_list();
+        if (!in_paragraph) { result += "<p>"; in_paragraph = true; }
+
+        std::string html_line = escape_html(line);
+        // **bold**
+        std::regex bold(R"(\*\*(.+?)\*\*)");
+        html_line = std::regex_replace(html_line, bold, "<strong>$1</strong>");
+        // `code`
+        std::regex code(R"(`(.+?)`)");
+        html_line = std::regex_replace(html_line, code, "<code>$1</code>");
+        // [link](url)
+        std::regex link(R"(\[([^\]]+)\]\(([^)]+)\))");
+        html_line = std::regex_replace(html_line, link, "<a href=\"$2\">$1</a>");
+
+        result += html_line + "<br>\n";
+    }
+
+    close_paragraph();
+    close_list();
+    if (in_code_block) { result += "</code></pre>\n"; }
+
+    return result;
+}
+
+// ============================================================================
+// Build diff data for code changes section
+// ============================================================================
+nlohmann::json HtmlReportGenerator::build_diff_data(const std::vector<FileChange>& files) {
+    nlohmann::json diff_files = nlohmann::json::array();
+
+    for (const auto& file : files) {
+        if (file.is_binary) continue;
+
+        nlohmann::json f;
+        f["filename"] = escape_html(file.filename);
+        f["status"] = file.status;
+        f["language"] = file.language;
+        f["additions"] = file.additions;
+        f["deletions"] = file.deletions;
+
+        // Build colorized diff lines
+        nlohmann::json diff_lines = nlohmann::json::array();
+        nlohmann::json diff_text = nlohmann::json::array();
+
+        for (const auto& hunk : file.hunks) {
+            // Add hunk header as context line
+            if (!hunk.header.empty()) {
+                nlohmann::json hl;
+                hl["type"] = "header";
+                hl["content"] = escape_html(hunk.header);
+                diff_lines.push_back(hl);
+                diff_text.push_back(hunk.header);
+            }
+
+            for (const auto& dline : hunk.lines) {
+                nlohmann::json dl;
+                switch (dline.type) {
+                    case LineType::Addition:
+                        dl["type"] = "addition";
+                        dl["prefix"] = "+";
+                        break;
+                    case LineType::Deletion:
+                        dl["type"] = "deletion";
+                        dl["prefix"] = "-";
+                        break;
+                    default:
+                        dl["type"] = "context";
+                        dl["prefix"] = " ";
+                        break;
+                }
+                dl["content"] = escape_html(dline.content);
+                dl["old_lineno"] = dline.old_lineno;
+                dl["new_lineno"] = dline.new_lineno;
+                diff_lines.push_back(dl);
+                diff_text.push_back(dl["prefix"].get<std::string>() + dline.content);
+            }
+        }
+
+        f["diff_lines"] = diff_lines;
+        f["has_diff"] = !diff_lines.empty();
+
+        // Limit to first 200 lines for display
+        if (diff_lines.size() > 200) {
+            nlohmann::json trunc;
+            trunc["type"] = "truncation";
+            trunc["content"] = "... (showing first 200 of " +
+                std::to_string(diff_lines.size()) + " changed lines)";
+            // Truncate the array
+            nlohmann::json truncated = nlohmann::json::array();
+            for (size_t i = 0; i < 200 && i < diff_lines.size(); i++) {
+                truncated.push_back(diff_lines[i]);
+            }
+            truncated.push_back(trunc);
+            f["diff_lines"] = truncated;
+        }
+
+        diff_files.push_back(f);
+    }
+
+    return diff_files;
+}
+
+// ============================================================================
 // Built-in Default Template
 // ============================================================================
 std::string HtmlReportGenerator::builtin_template() {
-    return R"TEMPLATE(<!DOCTYPE html>
+    std::string t;
+    t  = R"TEMPLATE(<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -542,7 +753,8 @@ body {
   word-break: break-all;
   margin-top: 8px;
 }
-
+)TEMPLATE";
+    t += R"TEMPLATE(
 /* ---- Severity Colors ---- */
 .severity-critical { background: var(--td-error-color); color: #FFFFFF; }
 .severity-high     { background: var(--td-warning-color); color: #FFFFFF; }
@@ -591,6 +803,84 @@ body {
 .empty-state p {
   font-size: var(--td-font-size-md);
 }
+
+/* ---- Diff View ---- */
+.diff-file {
+  margin-bottom: 16px;
+  border: 1px solid var(--td-border-color-light);
+  border-radius: var(--td-radius-default);
+  overflow: hidden;
+}
+.diff-file-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: var(--td-bg-color-component);
+  font-size: var(--td-font-size-sm);
+  flex-wrap: wrap;
+}
+.diff-file-header .diff-status {
+  padding: 2px 8px; border-radius: 100px;
+  font-weight: 600; font-size: var(--td-font-size-xs); text-transform: uppercase;
+}
+.diff-file-header .diff-status.Added    { background: #E8F8F2; color: var(--td-success-color); }
+.diff-file-header .diff-status.Modified { background: var(--td-brand-color-light); color: var(--td-brand-color); }
+.diff-file-header .diff-status.Removed  { background: var(--td-error-color-light); color: var(--td-error-color); }
+.diff-file-header .diff-status.Renamed  { background: #FEF3E6; color: var(--td-warning-color); }
+.diff-file-header .diff-filename {
+  font-weight: 600; font-family: "SF Mono", "Consolas", monospace; flex: 1;
+}
+.diff-file-header .diff-stats { color: var(--td-text-color-secondary); }
+.diff-file-header .diff-language {
+  color: var(--td-text-color-placeholder); font-size: var(--td-font-size-xs);
+}
+.diff-view {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 12px; line-height: 1.6; overflow-x: auto;
+  background: #FAFBFC;
+}
+.diff-line {
+  display: flex; align-items: baseline; padding: 1px 0;
+  white-space: pre; min-height: 20px;
+}
+.diff-line.diff-addition { background: #E6FFEC; }
+.diff-line.diff-deletion { background: #FFEBE9; }
+.diff-line.diff-context { background: transparent; }
+.diff-line.diff-header  { background: #F0F1F4; color: #656D76; font-weight: 600; }
+.diff-line.diff-truncation { background: #FFF8C5; color: #9A6700; text-align: center; justify-content: center; }
+.diff-lineno {
+  width: 45px; text-align: right; padding-right: 8px;
+  color: #8B949E; user-select: none; flex-shrink: 0;
+}
+.diff-prefix {
+  width: 16px; text-align: center; font-weight: 700; flex-shrink: 0;
+}
+.diff-addition .diff-prefix { color: var(--td-success-color); }
+.diff-deletion .diff-prefix { color: var(--td-error-color); }
+.diff-content { flex: 1; }
+
+/* ---- PR Description (MD rendered) ---- */
+.pr-description {
+  line-height: 1.8; font-size: var(--td-font-size-base);
+}
+.pr-description h3, .pr-description h4 {
+  margin: 16px 0 8px 0; color: var(--td-text-color-primary);
+}
+.pr-description ul { padding-left: 24px; margin: 8px 0; }
+.pr-description li { margin: 4px 0; }
+.pr-description p { margin: 8px 0; }
+.pr-description code {
+  background: var(--td-bg-color-component); padding: 2px 6px;
+  border-radius: var(--td-radius-small); font-family: "SF Mono", "Consolas", monospace;
+  font-size: 0.9em;
+}
+.pr-description pre {
+  background: #1E1E1E; color: #D4D4D4; padding: 12px 16px;
+  border-radius: var(--td-radius-default); overflow-x: auto; margin: 8px 0;
+}
+.pr-description pre code { background: none; padding: 0; color: inherit; }
+.pr-description a { color: var(--td-brand-color); text-decoration: none; }
+.pr-description a:hover { text-decoration: underline; }
+.pr-description strong { font-weight: 600; }
 
 /* ---- Footer ---- */
 .report-footer {
@@ -703,6 +993,43 @@ body {
     {% endif %}
   </section>
 
+  <!-- ===== CODE CHANGES ===== -->
+  {% if has_diff_data %}
+  <section class="section">
+    <h2 class="section-title">
+      <span class="icon">&#128196;</span> Code Changes
+    </h2>
+    {% for file in diff_files %}
+    <div class="diff-file">
+      <div class="diff-file-header">
+        <span class="diff-status {{ file.status }}">{{ file.status }}</span>
+        <span class="diff-filename">{{ file.filename }}</span>
+        <span class="diff-stats">+{{ file.additions }}/-{{ file.deletions }}</span>
+        {% if file.language %}<span class="diff-language">{{ file.language }}</span>{% endif %}
+      </div>
+      {% if file.has_diff %}
+      <div class="diff-view">
+        {% for line in file.diff_lines %}
+        {% if line.type == "truncation" %}
+        <div class="diff-line diff-truncation">{{ line.content }}</div>
+        {% else if line.type == "header" %}
+        <div class="diff-line diff-header">{{ line.content }}</div>
+        {% else %}
+        <div class="diff-line diff-{{ line.type }}">
+          <span class="diff-lineno">{{ line.old_lineno }}</span>
+          <span class="diff-lineno">{{ line.new_lineno }}</span>
+          <span class="diff-prefix">{{ line.prefix }}</span>
+          <span class="diff-content">{{ line.content }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   <!-- ===== ISSUES ===== -->
   <section class="section">
     <h2 class="section-title">
@@ -758,12 +1085,12 @@ body {
   </section>
 
   <!-- ===== PR DESCRIPTION (if any) ===== -->
-  {% if pr_description %}
+  {% if has_description %}
   <section class="section">
     <h2 class="section-title">
       <span class="icon">&#128220;</span> PR Description
     </h2>
-    <p class="summary-text">{{ pr_description }}</p>
+    <div class="pr-description">{{{ pr_description }}}</div>
   </section>
   {% endif %}
 
@@ -778,6 +1105,7 @@ body {
 </div>
 </body>
 </html>)TEMPLATE";
+    return t;
 }
 
 } // namespace ai_pr_reviewer

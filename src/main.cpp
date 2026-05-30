@@ -252,7 +252,7 @@ int run_review(const ai_pr_reviewer::AppConfig& config) {
     print_step("Generating HTML report...", 5, total_steps);
 
     ai_pr_reviewer::HtmlReportGenerator reporter(config);
-    bool report_ok = reporter.generate_report(pr_meta, result, config.output_path);
+    bool report_ok = reporter.generate_report(pr_meta, result, parsed_files, config.output_path);
 
     if (report_ok) {
         print_success("Report saved to: " + config.output_path);
