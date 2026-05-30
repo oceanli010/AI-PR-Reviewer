@@ -28,6 +28,18 @@ public:
                                             const std::string& repo,
                                             int pr_number);
 
+    // --- Repository & PR Discovery ---
+    // List repositories accessible by the authenticated user
+    // Type: "all", "owner", "public", "private", "member"
+    std::vector<RepoInfo> list_repos(const std::string& type = "all",
+                                      const std::string& filter = "");
+
+    // List PRs for a specific repository
+    // State: "open", "closed", "all"
+    std::vector<PrListItem> list_prs(const std::string& owner,
+                                      const std::string& repo,
+                                      const std::string& state = "open");
+
     // Progress callback for UI updates
     using ProgressCallback = std::function<void(const std::string& message)>;
     void set_progress_callback(ProgressCallback callback);

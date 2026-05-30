@@ -284,6 +284,85 @@ body {
 .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
 .empty-state p { font-size: var(--td-font-size-md); }
 
+/* ---- Diff View ---- */
+.diff-file {
+  margin-bottom: 16px;
+  border: 1px solid var(--td-border-color-light);
+  border-radius: var(--td-radius-default);
+  overflow: hidden;
+}
+.diff-file-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: var(--td-bg-color-component);
+  font-size: var(--td-font-size-sm);
+  flex-wrap: wrap;
+}
+.diff-file-header .diff-status {
+  padding: 2px 8px; border-radius: 100px;
+  font-weight: 600; font-size: var(--td-font-size-xs); text-transform: uppercase;
+}
+.diff-file-header .diff-status.Added    { background: #E8F8F2; color: var(--td-success-color); }
+.diff-file-header .diff-status.Modified { background: var(--td-brand-color-light); color: var(--td-brand-color); }
+.diff-file-header .diff-status.Removed  { background: var(--td-error-color-light); color: var(--td-error-color); }
+.diff-file-header .diff-status.Renamed  { background: #FEF3E6; color: var(--td-warning-color); }
+.diff-file-header .diff-filename {
+  font-weight: 600; font-family: "SF Mono", "Consolas", monospace; flex: 1;
+}
+.diff-file-header .diff-stats { color: var(--td-text-color-secondary); }
+.diff-file-header .diff-language {
+  color: var(--td-text-color-placeholder); font-size: var(--td-font-size-xs);
+}
+.diff-view {
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  font-size: 12px; line-height: 1.6; overflow-x: auto;
+  background: #FAFBFC;
+}
+.diff-line {
+  display: flex; align-items: baseline; padding: 1px 0;
+  white-space: pre; min-height: 20px;
+}
+.diff-line.diff-addition { background: #E6FFEC; }
+.diff-line.diff-deletion { background: #FFEBE9; }
+.diff-line.diff-context { background: transparent; }
+.diff-line.diff-header  { background: #F0F1F4; color: #656D76; font-weight: 600; }
+.diff-line.diff-truncation { background: #FFF8C5; color: #9A6700; text-align: center; justify-content: center; }
+.diff-lineno {
+  width: 45px; text-align: right; padding-right: 8px;
+  color: #8B949E; user-select: none; flex-shrink: 0;
+}
+.diff-prefix {
+  width: 16px; text-align: center; font-weight: 700; flex-shrink: 0;
+}
+.diff-addition .diff-prefix { color: var(--td-success-color); }
+.diff-deletion .diff-prefix { color: var(--td-error-color); }
+.diff-content { flex: 1; }
+
+/* ---- PR Description (MD rendered) ---- */
+.pr-description {
+  line-height: 1.8; font-size: var(--td-font-size-base);
+}
+.pr-description h1, .pr-description h2, .pr-description h3,
+.pr-description h4, .pr-description h5, .pr-description h6 {
+  margin: 16px 0 8px 0; color: var(--td-text-color-primary);
+}
+.pr-description ul { padding-left: 24px; margin: 8px 0; }
+.pr-description li { margin: 4px 0; }
+.pr-description p { margin: 8px 0; }
+.pr-description code {
+  background: var(--td-bg-color-component); padding: 2px 6px;
+  border-radius: var(--td-radius-small); font-family: "SF Mono", "Consolas", monospace;
+  font-size: 0.9em;
+}
+.pr-description pre {
+  background: #1E1E1E; color: #D4D4D4; padding: 12px 16px;
+  border-radius: var(--td-radius-default); overflow-x: auto; margin: 8px 0;
+}
+.pr-description pre code { background: none; padding: 0; color: inherit; }
+.pr-description a { color: var(--td-brand-color); text-decoration: none; }
+.pr-description a:hover { text-decoration: underline; }
+.pr-description strong { font-weight: 600; }
+
 /* ---- Footer ---- */
 .report-footer {
   text-align: center; padding: 24px;
@@ -354,6 +433,41 @@ body {
     {% endif %}
   </section>
 
+  <!-- ===== CODE CHANGES ===== -->
+  {% if has_diff_data %}
+  <section class="section">
+    <h2 class="section-title">&#128196; Code Changes</h2>
+    {% for file in diff_files %}
+    <div class="diff-file">
+      <div class="diff-file-header">
+        <span class="diff-status {{ file.status }}">{{ file.status }}</span>
+        <span class="diff-filename">{{ file.filename }}</span>
+        <span class="diff-stats">+{{ file.additions }}/-{{ file.deletions }}</span>
+        {% if file.language %}<span class="diff-language">{{ file.language }}</span>{% endif %}
+      </div>
+      {% if file.has_diff %}
+      <div class="diff-view">
+        {% for line in file.diff_lines %}
+        {% if line.type == "truncation" %}
+        <div class="diff-line diff-truncation">{{ line.content }}</div>
+        {% else if line.type == "header" %}
+        <div class="diff-line diff-header">{{ line.content }}</div>
+        {% else %}
+        <div class="diff-line diff-{{ line.type }}">
+          <span class="diff-lineno">{{ line.old_lineno }}</span>
+          <span class="diff-lineno">{{ line.new_lineno }}</span>
+          <span class="diff-prefix">{{ line.prefix }}</span>
+          <span class="diff-content">{{ line.content }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   <!-- ===== ISSUES ===== -->
   <section class="section">
     <h2 class="section-title">
@@ -406,10 +520,10 @@ body {
   </section>
 
   <!-- ===== PR DESCRIPTION ===== -->
-  {% if pr_description %}
+  {% if has_description %}
   <section class="section">
     <h2 class="section-title">&#128220; PR Description</h2>
-    <p class="summary-text">{{ pr_description }}</p>
+    <div class="pr-description">{{{ pr_description }}}</div>
   </section>
   {% endif %}
 

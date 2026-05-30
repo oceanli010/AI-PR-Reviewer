@@ -4,15 +4,17 @@
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
 
-**AI PR Reviewer** 是一个基于 AI 的 Pull Request 代码评审工具，帮助开发者提升代码审查的效率和代码质量。用户只需指定一个 GitHub PR，工具会自动获取代码变更并调用 OpenAI GPT-4o 进行智能分析，生成一份结构化的 HTML 评审报告。
+**AI PR Reviewer** 是一个基于 AI 的 Pull Request 代码评审工具，帮助开发者提升代码审查的效率和代码质量。支持多 AI 模型切换（OpenAI/DeepSeek/本地模型等），可通过 GitHub Token 自动发现仓库和 PR，实现端到端的智能代码评审体验。
 
 ---
 
 ## 功能特性
 
 - **PR 变更自动获取** — 通过 GitHub REST API 获取 PR 的元数据和文件 diff
+- **多 AI 模型支持** — 通过配置文件配置多个 AI 提供商（OpenAI、DeepSeek、Azure、Ollama 等），自由切换
+- **仓库与 PR 发现** — 使用 GitHub Token 自动列出可访问仓库和 PR，支持交互式选择（`--discover`）
 - **结构化 Diff 解析** — 将 unified diff 格式解析为结构化的代码变更数据
-- **AI 智能分析** — 调用 OpenAI GPT-4o 从安全、Bug、性能、风格等多维度分析代码
+- **AI 智能分析** — 从安全、Bug、性能、风格等多维度分析代码
 - **批量处理** — 大 PR 自动拆分为多个批次进行分析，避免 token 超限
 - **风险代码识别** — 按严重程度（Critical/High/Medium/Low/Info）分类标注问题
 - **HTML 报告生成** — 基于 TDesign 设计规范的现代 HTML 评审报告，支持离线查看
@@ -159,34 +161,39 @@ ai-pr-reviewer --api-key "sk-xxx" --pr-url "https://github.com/owner/repo/pull/1
 ### 使用示例
 
 ```powershell
-# 基本用法：分析一个 GitHub PR
-.\build\Release\ai-pr-reviewer.exe `
-    --api-key "sk-your-key" `
-    --pr-url "https://github.com/oceanli010/AI-PR-Reviewer/pull/1" `
-    --output "report.html"
+# === 方式一：交互式发现模式（推荐） ===
+# 使用 GitHub Token 自动列出仓库和 PR，交互选择
+$env:GITHUB_TOKEN = "ghp_your_token"
+.\ai-pr-reviewer.exe --discover
 
-# 使用环境变量中的 API Key
-$env:OPENAI_API_KEY = "sk-your-key"
-.\build\Release\ai-pr-reviewer.exe `
-    --pr-url "https://github.com/myorg/myrepo/pull/42" `
-    --output "review-results.html" `
-    --verbose
+# 带过滤条件的发现模式
+.\ai-pr-reviewer.exe --discover --repo-filter "AI" --pr-state "open"
 
-# 使用配置文件
-.\build\Release\ai-pr-reviewer.exe `
-    --config "config.yaml" `
-    --pr-url "https://github.com/org/repo/pull/100"
+# === 方式二：列出仓库 ===
+.\ai-pr-reviewer.exe --list-repos --github-token "ghp_xxx"
+.\ai-pr-reviewer.exe --list-repos --repo-filter "backend"
+
+# === 方式三：直接指定 PR ===
+# 基本用法
+.\ai-pr-reviewer.exe --api-key "sk-your-key" `
+    --pr-url "https://github.com/oceanli010/AI-PR-Reviewer/pull/1"
 
 # 使用单独的 owner/repo/number 参数
-.\build\Release\ai-pr-reviewer.exe `
-    --owner "myorg" --repo "myrepo" --pr-number 42
+.\ai-pr-reviewer.exe --owner "myorg" --repo "myrepo" --pr-number 42
 
-# 自定义模型和温度参数
-.\build\Release\ai-pr-reviewer.exe `
-    --pr-url "https://github.com/org/repo/pull/100" `
-    --model "gpt-4-turbo" `
-    --temperature 0.5 `
-    --max-files-per-batch 5
+# 切换 AI 提供商（使用配置文件中的第 2 个 provider）
+.\ai-pr-reviewer.exe --config "config.yaml" --provider 1 `
+    --pr-url "https://github.com/org/repo/pull/100"
+
+# 使用本地 Ollama 模型
+.\ai-pr-reviewer.exe --api-key "ollama" `
+    --base-url "http://localhost:11434/v1" `
+    --model "qwen2.5:7b" `
+    --pr-url "https://github.com/org/repo/pull/100"
+
+# === 方式四：配置文件 ===
+.\ai-pr-reviewer.exe --config "config.yaml" `
+    --pr-url "https://github.com/org/repo/pull/100"
 ```
 
 ### 命令行参数说明
@@ -199,9 +206,22 @@ PR Source (choose one):
   -o, --owner TEXT            Repository owner
   -r, --repo TEXT             Repository name
   -n, --pr-number INT         PR number
+  -D, --discover              Interactive: discover repos & PRs via GitHub token
+  -L, --list-repos            List accessible repositories
+      --repo-filter TEXT      Filter repos by name pattern
+      --pr-state TEXT         Filter PRs by state [default: open]
 
-OpenAI Settings:
-  -k, --api-key TEXT          OpenAI API key [$OPENAI_API_KEY]
+Discovery Mode:
+  -D, --discover              Interactive mode: browse repos and PRs
+      --repo-filter TEXT      Filter repos by name (e.g. "backend", "AI")
+      --pr-state TEXT         PR state filter: open, closed, all [default: open]
+
+AI Provider Settings:
+  -k, --api-key TEXT          AI API key [$OPENAI_API_KEY]
+  -m, --model TEXT            Model name [default: gpt-4o]
+      --base-url TEXT         API base URL [default: https://api.openai.com/v1]
+  -p, --provider INT          Select AI provider index from config [default: 0]
+      --temperature FLOAT     Response temperature [default: 0.3]
   -m, --model TEXT            Model name [default: gpt-4o]
   --base-url TEXT             API base URL [default: https://api.openai.com/v1]
   --temperature FLOAT         Response temperature [default: 0.3]
@@ -223,6 +243,45 @@ Runtime:
   --max-files-per-batch INT   Max files per AI batch [default: 10]
   -V, --version               Print version
 ```
+
+---
+
+### 多 AI 模型配置
+
+在 `config.yaml` 中配置多个 AI 提供商，通过配置文件或 `--provider N` 参数切换：
+
+```yaml
+ai:
+  providers:
+    - name: "OpenAI GPT-4o"
+      model: "gpt-4o"
+      base_url: "https://api.openai.com/v1"
+      api_key: "${OPENAI_API_KEY}"    # 支持 ${ENV_VAR} 环境变量引用
+      temperature: 0.3
+      max_tokens: 4096
+      default: true                    # 默认使用此提供商
+
+    - name: "DeepSeek V3"
+      model: "deepseek-chat"
+      base_url: "https://api.deepseek.com/v1"
+      api_key: "${DEEPSEEK_API_KEY}"
+      temperature: 0.3
+      max_tokens: 4096
+
+    - name: "Local Ollama"
+      model: "qwen2.5:7b"
+      base_url: "http://localhost:11434/v1"
+      api_key: "ollama"
+      temperature: 0.3
+      max_tokens: 2048
+```
+
+支持的 AI 提供商：
+- **OpenAI** — GPT-4o, GPT-4-turbo 等
+- **DeepSeek** — deepseek-chat, deepseek-reasoner
+- **Azure OpenAI** — 企业级部署
+- **Ollama / LM Studio** — 本地部署模型（兼容 OpenAI API）
+- **任何 OpenAI API 兼容服务** — 只要支持 `/v1/chat/completions` 端点
 
 ---
 

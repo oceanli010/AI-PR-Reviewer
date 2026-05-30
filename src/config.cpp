@@ -8,6 +8,13 @@
 #include <regex>
 #include <stdexcept>
 #include <iostream>
+#include <fstream>
+#include <algorithm>
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace ai_pr_reviewer {
 
@@ -58,6 +65,24 @@ AppConfig ConfigManager::load(int argc, char* argv[]) {
     cli_app.add_option("--github-token", config.github_token,
         "GitHub personal access token (or set GITHUB_TOKEN env var)")
         ->envname("GITHUB_TOKEN");
+
+    // --- Discovery Mode ---
+    cli_app.add_flag("--discover,-D", config.discover_mode,
+        "Interactive mode: discover repos and PRs via GitHub token");
+
+    cli_app.add_flag("--list-repos,-L", config.list_repos,
+        "List accessible repositories (requires --github-token)");
+
+    cli_app.add_option("--repo-filter", config.repo_filter,
+        "Filter repositories by name pattern (supports wildcard)");
+
+    cli_app.add_option("--pr-state", config.pr_state_filter,
+        "Filter PRs by state (open, closed, all)")
+        ->default_val("open");
+
+    cli_app.add_option("--provider,-p", config.selected_provider_index,
+        "Select AI provider by index (0-based, from config file)")
+        ->default_val(0);
 
     // --- Output Options ---
     cli_app.add_option("--output,-O", config.output_path,
@@ -110,9 +135,43 @@ AppConfig ConfigManager::load(int argc, char* argv[]) {
         config.pr_number = pr_number;
     }
 
-    // --- Load config file if specified ---
+    // --- Load config file: explicit path > auto-search > skip ---
     if (!config.config_file.empty()) {
         load_from_file(config, config.config_file);
+    } else {
+        // Auto-search config.yaml in: exe dir > project root > CWD
+        std::vector<std::string> search_paths;
+
+        // 1. Executable directory
+#ifdef _WIN32
+        char exe_path[MAX_PATH];
+        DWORD len = GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
+        if (len > 0 && len < MAX_PATH) {
+            std::string exe_dir(exe_path, len);
+            auto last_slash = exe_dir.find_last_of("\\/");
+            if (last_slash != std::string::npos) {
+                exe_dir = exe_dir.substr(0, last_slash);
+                search_paths.push_back(exe_dir + "\\config.yaml");
+                // 2. Parent directory (project root when running from build/Release/)
+                auto penultimate = exe_dir.find_last_of("\\/", last_slash - 1);
+                if (penultimate != std::string::npos) {
+                    search_paths.push_back(exe_dir.substr(0, penultimate) + "\\config.yaml");
+                }
+            }
+        }
+#endif
+        // 3. Current working directory
+        search_paths.push_back("config.yaml");
+
+        for (const auto& path : search_paths) {
+            std::ifstream auto_cfg(path);
+            if (auto_cfg.good()) {
+                auto_cfg.close();
+                spdlog::debug("Auto-detected config: {}", path);
+                load_from_file(config, path);
+                break;
+            }
+        }
     }
 
     // --- Apply environment variable overrides ---
@@ -162,7 +221,47 @@ void ConfigManager::load_from_file(AppConfig& config, const std::string& filepat
     try {
         YAML::Node root = YAML::LoadFile(filepath);
 
-        // OpenAI section
+        // --- AI Providers section (new multi-model support) ---
+        if (root["ai"] && root["ai"]["providers"] && root["ai"]["providers"].IsSequence()) {
+            config.ai_providers.clear();
+            int idx = 0;
+            for (const auto& prov_node : root["ai"]["providers"]) {
+                AiProvider provider;
+                provider.name = prov_node["name"] ? prov_node["name"].as<std::string>()
+                    : ("Provider-" + std::to_string(idx));
+                provider.model = prov_node["model"] ? prov_node["model"].as<std::string>()
+                    : "gpt-4o";
+                provider.base_url = prov_node["base_url"] ? prov_node["base_url"].as<std::string>()
+                    : "https://api.openai.com/v1";
+
+                // API key: explicit value or env var reference
+                if (prov_node["api_key"]) {
+                    std::string key = prov_node["api_key"].as<std::string>();
+                    // Support ${ENV_VAR} syntax for env var references
+                    if (key.size() > 3 && key[0] == '$' && key[1] == '{' && key.back() == '}') {
+                        std::string env_name = key.substr(2, key.size() - 3);
+                        const char* env_val = std::getenv(env_name.c_str());
+                        provider.api_key = env_val ? env_val : "";
+                    } else {
+                        provider.api_key = key;
+                    }
+                }
+
+                if (prov_node["temperature"]) provider.temperature = prov_node["temperature"].as<float>();
+                if (prov_node["max_tokens"]) provider.max_tokens = prov_node["max_tokens"].as<int>();
+                if (prov_node["timeout_seconds"]) provider.timeout_seconds = prov_node["timeout_seconds"].as<int>();
+                if (prov_node["default"] && prov_node["default"].as<bool>()) {
+                    provider.is_default = true;
+                    config.selected_provider_index = idx;
+                }
+
+                config.ai_providers.push_back(std::move(provider));
+                idx++;
+            }
+            spdlog::info("Loaded {} AI provider(s) from config", config.ai_providers.size());
+        }
+
+        // Backward compatibility: legacy openai section
         if (root["openai"]) {
             auto openai = root["openai"];
             if (openai["api_key"] && config.openai_api_key.empty()) {
@@ -265,22 +364,60 @@ void ConfigManager::apply_env_overrides(AppConfig& config) {
 // Validation
 // ============================================================================
 void ConfigManager::validate(AppConfig& config) {
-    // Check required: PR source
-    if (config.owner.empty() || config.repo.empty() || config.pr_number <= 0) {
-        throw std::runtime_error(
-            "Missing PR information. Provide one of:\n"
-            "  --pr-url https://github.com/owner/repo/pull/123\n"
-            "  --owner OWNER --repo REPO --pr-number 123"
-        );
+    // --- Discovery mode: requires GitHub token ---
+    if (config.discover_mode) {
+        if (config.github_token.empty()) {
+            throw std::runtime_error(
+                "Discovery mode requires a GitHub token. Provide it via:\n"
+                "  --github-token YOUR_TOKEN\n"
+                "  GITHUB_TOKEN environment variable\n"
+                "  config.yaml 'github.token' field"
+            );
+        }
+        spdlog::info("Discovery mode enabled - will list repos and PRs");
+        // Don't validate PR source - will be discovered
+    }
+    // --- List repos mode ---
+    else if (config.list_repos) {
+        if (config.github_token.empty()) {
+            throw std::runtime_error(
+                "Listing repositories requires a GitHub token. Provide it via:\n"
+                "  --github-token YOUR_TOKEN\n"
+                "  GITHUB_TOKEN environment variable"
+            );
+        }
+        // Don't validate PR source
+    }
+    // --- Standard PR review mode ---
+    else {
+        if (config.owner.empty() || config.repo.empty() || config.pr_number <= 0) {
+            throw std::runtime_error(
+                "Missing PR information. Provide one of:\n"
+                "  --pr-url https://github.com/owner/repo/pull/123\n"
+                "  --owner OWNER --repo REPO --pr-number 123\n"
+                "  --discover (to find repos and PRs interactively)"
+            );
+        }
     }
 
-    // Check required: API key
-    if (config.openai_api_key.empty()) {
+    // Check required: API key (from provider or legacy)
+    auto active = config.active_provider();
+    if (active.api_key.empty()) {
+        std::string provider_hint;
+        if (!config.ai_providers.empty()) {
+            int idx = config.selected_provider_index;
+            if (idx >= 0 && idx < static_cast<int>(config.ai_providers.size())) {
+                provider_hint = " (active provider: " + config.ai_providers[idx].name +
+                                ", model: " + config.ai_providers[idx].model + ")";
+            }
+        }
         throw std::runtime_error(
-            "OpenAI API key is required. Provide it via:\n"
+            "AI API key is required" + provider_hint + ".\n"
+            "Provide it via:\n"
             "  --api-key YOUR_KEY\n"
-            "  OPENAI_API_KEY environment variable\n"
-            "  config.yaml 'openai.api_key' field"
+            "  set OPENAI_API_KEY=YOUR_KEY    (environment variable on CMD)\n"
+            "  $env:OPENAI_API_KEY = 'YOUR_KEY'  (environment variable on PowerShell)\n"
+            "  Or fill api_key in config.yaml 'ai.providers[].api_key' field"
         );
     }
 
@@ -290,13 +427,26 @@ void ConfigManager::validate(AppConfig& config) {
         config.temperature = std::max(0.0f, std::min(2.0f, config.temperature));
     }
 
+    // Validate provider index
+    if (!config.ai_providers.empty() &&
+        (config.selected_provider_index < 0 ||
+         config.selected_provider_index >= static_cast<int>(config.ai_providers.size()))) {
+        spdlog::warn("Invalid provider index {}, using 0", config.selected_provider_index);
+        config.selected_provider_index = 0;
+    }
+
     // Validate retry count
     if (config.retry_count < 0) config.retry_count = 0;
     if (config.retry_count > 10) config.retry_count = 10;
 
     spdlog::debug("Configuration validated successfully");
-    spdlog::debug("  PR: {}/{}/{}", config.owner, config.repo, config.pr_number);
-    spdlog::debug("  Model: {}", config.openai_model);
+    if (config.discover_mode || config.list_repos) {
+        spdlog::debug("  Mode: repository discovery");
+    } else {
+        spdlog::debug("  PR: {}/{}/{}", config.owner, config.repo, config.pr_number);
+    }
+    spdlog::debug("  Model: {}", active.model);
+    spdlog::debug("  Provider: {} ({})", active.name, active.base_url);
     spdlog::debug("  Output: {}", config.output_path);
 }
 
