@@ -27,7 +27,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    AI PR Reviewer v1.0                     │
+│                    AI PR Reviewer v1.1                     │
 ├──────────────────────────────────────────────────────────┤
 │                                                          │
 │  CLI Entry (CLI11)                                       │
@@ -38,7 +38,7 @@
 │      ▼                                                   │
 │  ┌─────────────┐   ┌──────────────┐   ┌───────────────┐ │
 │  │ GitHub API  │──▶│ Diff Parser  │──▶│ AI Analyzer   │ │
-│  │ (cpprestsdk)│   │  (C++ regex) │   │ (OpenAI GPT-4o)│ │
+│  │ (cpprestsdk)│   │  (C++ regex) │   │ (Multi-model) │ │
 │  └─────────────┘   └──────────────┘   └───────┬───────┘ │
 │                                                │         │
 │                                                ▼         │
@@ -56,12 +56,12 @@
 
 | 模块 | 职责 | 核心技术 |
 |------|------|---------|
-| CLI Entry | 命令行参数解析、流程编排 | CLI11 |
-| Config Manager | 配置文件加载、三级优先级合并 | yaml-cpp |
-| GitHub Client | PR 元数据获取、文件 diff 下载 | cpprestsdk |
-| Diff Parser | Unified diff 解析、语言检测 | C++ regex |
-| AI Analyzer | Prompt 构建、OpenAI API 调用、结果解析 | cpprestsdk + nlohmann/json |
-| HTML Report | inja 模板渲染、TDesign 样式 | inja + 内联 CSS |
+| CLI Entry | 命令行参数解析、流程编排（含交互式发现模式） | CLI11 |
+| Config Manager | 配置文件加载、多 AI Provider 管理、三级优先级合并 | yaml-cpp |
+| GitHub Client | PR 元数据获取、仓库/PR 发现、文件 diff 下载 | cpprestsdk |
+| Diff Parser | Unified diff 解析、语言检测（40+ 语言） | C++ regex |
+| AI Analyzer | Prompt 构建、多模型 API 调用（兼容 OpenAI API）、结果解析 | cpprestsdk + nlohmann/json |
+| HTML Report | inja 模板渲染、Markdown 渲染、Diff 视图、TDesign 样式 | inja + 内联 CSS |
 
 ---
 
@@ -222,9 +222,6 @@ AI Provider Settings:
       --base-url TEXT         API base URL [default: https://api.openai.com/v1]
   -p, --provider INT          Select AI provider index from config [default: 0]
       --temperature FLOAT     Response temperature [default: 0.3]
-  -m, --model TEXT            Model name [default: gpt-4o]
-  --base-url TEXT             API base URL [default: https://api.openai.com/v1]
-  --temperature FLOAT         Response temperature [default: 0.3]
 
 GitHub Settings:
   --github-token TEXT         GitHub PAT [$GITHUB_TOKEN]
@@ -290,33 +287,33 @@ ai:
 ```
 AI-PR-Reviewer/
 ├── CMakeLists.txt                    # 构建配置
-├── vcpkg.json                        # vcpkg 依赖清单
-├── config.example.yaml               # 示例配置文件
+├── CMakePresets.json                 # CMake 预设配置（VS2022 + vcpkg）
+├── vcpkg.json                        # vcpkg 依赖清单（manifest 模式）
+├── config.example.yaml               # 多模型配置示例文件
 ├── README.md                         # 项目文档
 ├── LICENSE                           # MIT 许可证
 ├── include/
 │   └── ai_pr_reviewer/
-│       ├── types.h                   # 公共数据类型定义
+│       ├── types.h                   # 公共数据类型（含 AiProvider、RepoInfo 等）
 │       ├── config.h                  # 配置管理接口
-│       ├── github_client.h           # GitHub API 客户端接口
+│       ├── github_client.h           # GitHub API 客户端接口（含仓库/PR 发现）
 │       ├── diff_parser.h             # Diff 解析器接口
-│       ├── ai_analyzer.h             # AI 分析引擎接口
-│       └── html_report.h             # HTML 报告生成器接口
+│       ├── ai_analyzer.h             # AI 分析引擎接口（多模型支持）
+│       └── html_report.h             # HTML 报告生成器接口（含 Diff 视图）
 ├── src/
-│   ├── main.cpp                      # CLI 入口与流程编排
-│   ├── config.cpp                    # 配置管理实现
-│   ├── github_client.cpp             # GitHub API 客户端实现
-│   ├── diff_parser.cpp               # Diff 解析器实现
-│   ├── ai_analyzer.cpp               # AI 分析引擎实现
-│   └── html_report.cpp               # HTML 报告生成器实现
+│   ├── main.cpp                      # CLI 入口（含交互式发现模式、防闪退）
+│   ├── config.cpp                    # 配置管理（含多 Provider 解析、自动发现配置）
+│   ├── github_client.cpp             # GitHub API 客户端（含仓库/PR 列表、增强错误诊断）
+│   ├── diff_parser.cpp               # Diff 解析器（40+ 语言检测）
+│   ├── ai_analyzer.cpp               # AI 分析引擎（多模型路由）
+│   └── html_report.cpp               # HTML 报告生成器（Markdown 渲染 + Diff 视图）
 ├── templates/
-│   └── report.html                   # inja HTML 报告模板
-├── tests/
-│   ├── test_diff_parser.cpp          # Diff 解析器单元测试
-│   ├── test_config.cpp               # 配置管理单元测试
-│   ├── test_github_client.cpp        # GitHub 客户端测试
-│   └── test_ai_analyzer.cpp          # AI 分析引擎测试
-└── packaging/                        # Inno Setup 安装包脚本（待添加）
+│   └── report.html                   # inja HTML 报告模板（TDesign 风格）
+└── tests/
+    ├── test_diff_parser.cpp          # Diff 解析器单元测试
+    ├── test_config.cpp               # 配置管理单元测试
+    ├── test_github_client.cpp        # GitHub 客户端测试
+    └── test_ai_analyzer.cpp          # AI 分析引擎测试
 ```
 
 ---
@@ -325,11 +322,13 @@ AI-PR-Reviewer/
 
 ### 模型选择
 
-选用 **OpenAI GPT-4o** 作为核心分析引擎，理由如下：
+系统采用**多 AI 模型可配置**架构，默认推荐 **OpenAI GPT-4o**，同时支持任意兼容 OpenAI API 的模型服务：
+
 - **代码理解能力强**: GPT-4o 在代码理解和分析任务上表现优异，能准确识别安全漏洞、逻辑错误、性能问题
+- **多模型热切换**: 支持通过配置文件或命令行参数在 OpenAI / DeepSeek / Azure / Ollama / 本地模型之间切换
 - **结构化输出**: 支持 JSON mode，确保分析结果格式统一可解析
-- **上下文窗口大**: 128K token 上下文窗口，可处理大部分 PR 中的所有文件变更
-- **API 成熟稳定**: OpenAI API 文档完善，SDK 生态丰富
+- **上下文窗口大**: 主流模型具备 128K+ token 上下文窗口，可处理大部分 PR 中的所有文件变更
+- **API 生态兼容**: 所有兼容 OpenAI `/v1/chat/completions` 端点的服务均可接入
 
 ### 上下文获取方式
 
@@ -343,14 +342,13 @@ AI-PR-Reviewer/
 
 ### 未来扩展方向
 
-1. **多模型支持**: 支持 Claude、DeepSeek、本地 Ollama 模型，让用户灵活选择
-2. **增量评审**: 针对同一 PR 的后续 push，只评审增量变化，减少 token 消耗
-3. **自定义规则**: 支持用户配置项目级别的评审规则文件（如 `.pr-review-rules.yaml`）
-4. **PR 评论自动发布**: 将评审结果自动作为 PR Review Comments 发布到 GitHub
-5. **历史趋势分析**: 追踪多次 PR 评审结果，分析代码质量变化趋势
-6. **CI/CD 集成**: 提供 GitHub Actions / Jenkins 插件，在 CI 流水线中自动执行
-7. **多仓库支持**: 支持 GitLab、Bitbucket 等其他代码托管平台
-8. **GUI 界面**: 基于 Qt 或 Electron 开发图形化客户端
+1. **增量评审**: 针对同一 PR 的后续 push，只评审增量变化，减少 token 消耗
+2. **自定义规则**: 支持用户配置项目级别的评审规则文件（如 `.pr-review-rules.yaml`）
+3. **PR 评论自动发布**: 将评审结果自动作为 PR Review Comments 发布到 GitHub
+4. **历史趋势分析**: 追踪多次 PR 评审结果，分析代码质量变化趋势
+5. **CI/CD 集成**: 提供 GitHub Actions / Jenkins 等 CI 插件，在流水线中自动执行
+6. **多平台支持**: 扩展至 GitLab、Bitbucket 等其他代码托管平台
+7. **GUI 界面**: 基于 Qt 或 Electron 开发图形化客户端
 
 ---
 
