@@ -250,19 +250,23 @@ std::string AIAnalyzer::build_batch_prompt(const PrMetadata& pr_meta,
 // ============================================================================
 std::string AIAnalyzer::call_openai_api(const std::string& system_prompt,
                                          const std::string& user_prompt) {
-    std::string request_body = build_request_body(
-        system_prompt, user_prompt, config_.openai_model,
-        config_.temperature, config_.max_tokens);
+    // Use the active AI provider (supports multi-model switching)
+    auto provider = config_.active_provider();
 
-    std::string url = config_.openai_base_url + "/chat/completions";
+    std::string request_body = build_request_body(
+        system_prompt, user_prompt, provider.model,
+        provider.temperature, provider.max_tokens);
+
+    std::string url = provider.base_url + "/chat/completions";
 
     if (config_.verbose) {
-        spdlog::debug("OpenAI API URL: {}", url);
+        spdlog::debug("AI API: {} ({})", provider.name, url);
+        spdlog::debug("Model: {}, Temperature: {}", provider.model, provider.temperature);
         spdlog::debug("Request body size: {} bytes", request_body.size());
     }
 
     http_client_config client_config;
-    client_config.set_timeout(std::chrono::seconds(config_.context_timeout_seconds));
+    client_config.set_timeout(std::chrono::seconds(provider.timeout_seconds));
 
     std::string last_error;
     for (int attempt = 0; attempt <= config_.retry_count; attempt++) {
@@ -272,7 +276,7 @@ std::string AIAnalyzer::call_openai_api(const std::string& system_prompt,
 
             request.headers().add(U("Content-Type"), U("application/json"));
             request.headers().add(U("Authorization"),
-                U("Bearer ") + utility::conversions::to_string_t(config_.openai_api_key));
+                U("Bearer ") + utility::conversions::to_string_t(provider.api_key));
 
             request.set_body(utility::conversions::to_string_t(request_body));
 

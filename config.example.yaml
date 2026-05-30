@@ -1,32 +1,86 @@
 # ============================================================================
-# AI PR Reviewer - Example Configuration
+# AI PR Reviewer v1.1 - Example Configuration
 # ============================================================================
 # Copy this file to config.yaml and fill in your values.
 # CLI arguments and environment variables take precedence over this file.
 
-# --- OpenAI API Configuration ---
+# ============================================================================
+# AI Providers (multi-model support)
+# ============================================================================
+# Configure one or more AI providers. Switch between them via --provider N or
+# set "default: true" on your preferred provider.
+ai:
+  providers:
+    # --- OpenAI GPT-4o (default) ---
+    - name: "OpenAI GPT-4o"
+      model: "gpt-4o"
+      base_url: "https://api.openai.com/v1"
+      api_key: ""                     # Or: "${OPENAI_API_KEY}" to read from env var
+      temperature: 0.3
+      max_tokens: 4096
+      timeout_seconds: 120
+      default: true                   # Use this provider by default
+
+    # --- DeepSeek V3 (uncomment to enable) ---
+    # - name: "DeepSeek V3"
+    #   model: "deepseek-chat"
+    #   base_url: "https://api.deepseek.com/v1"
+    #   api_key: "${DEEPSEEK_API_KEY}" # Reads from DEEPSEEK_API_KEY env var
+    #   temperature: 0.3
+    #   max_tokens: 4096
+    #   timeout_seconds: 120
+
+    # --- Azure OpenAI (uncomment to enable) ---
+    # - name: "Azure OpenAI GPT-4"
+    #   model: "gpt-4"
+    #   base_url: "https://your-resource.openai.azure.com/openai/deployments/gpt-4"
+    #   api_key: "${AZURE_OPENAI_KEY}"
+    #   temperature: 0.3
+    #   max_tokens: 4096
+    #   timeout_seconds: 120
+
+    # --- Local Model via Ollama / OpenAI-compatible API ---
+    # - name: "Local Qwen"
+    #   model: "qwen2.5:7b"
+    #   base_url: "http://localhost:11434/v1"
+    #   api_key: "ollama"             # Ollama doesn't require a real key
+    #   temperature: 0.3
+    #   max_tokens: 2048
+    #   timeout_seconds: 300
+
+# ============================================================================
+# Legacy OpenAI section (backward compatible)
+# ============================================================================
 openai:
-  api_key: ""                     # Or set OPENAI_API_KEY environment variable
-  model: "gpt-4o"                 # gpt-4o, gpt-4-turbo, gpt-4, gpt-3.5-turbo
+  api_key: ""                         # Or set OPENAI_API_KEY environment variable
+  model: "gpt-4o"
   base_url: "https://api.openai.com/v1"
-  temperature: 0.3                # 0.0 = deterministic, 1.0 = creative
+  temperature: 0.3
   max_tokens: 4096
   timeout_seconds: 120
 
-# --- GitHub Configuration ---
+# ============================================================================
+# GitHub Configuration
+# ============================================================================
 github:
-  token: ""                       # Optional: increases API rate limit from 60 to 5000 req/h
-                                  # Or set GITHUB_TOKEN environment variable
+  token: ""                           # GitHub Personal Access Token
+                                      # Required for: --discover, --list-repos
+                                      # Recommended for: higher API rate limits (5000 vs 60 req/h)
+                                      # Or set GITHUB_TOKEN environment variable
 
-# --- Output Configuration ---
+# ============================================================================
+# Output Configuration
+# ============================================================================
 output:
-  path: "review-report.html"      # Default output file path
-  template: ""                    # Custom HTML template path (leave empty for built-in)
+  path: "review-report.html"
+  template: ""                        # Custom HTML template path (leave empty for built-in)
 
-# --- Runtime Options ---
+# ============================================================================
+# Runtime Options
+# ============================================================================
 runtime:
-  retry_count: 3                  # Number of retries for API calls
-  retry_delay_ms: 1000            # Delay between retries (milliseconds)
-  max_files_per_batch: 10         # Max files per AI analysis batch
+  retry_count: 3
+  retry_delay_ms: 1000
+  max_files_per_batch: 10
   verbose: false
   quiet: false

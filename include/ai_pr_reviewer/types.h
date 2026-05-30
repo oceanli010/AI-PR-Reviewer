@@ -111,6 +111,50 @@ struct ReviewResult {
 };
 
 // ============================================================================
+// AI Provider configuration (supports multi-model switching)
+// ============================================================================
+struct AiProvider {
+    std::string name;                // Display name, e.g. "OpenAI GPT-4o", "DeepSeek V3"
+    std::string api_key;             // API key (or env var reference)
+    std::string model;               // Model identifier, e.g. "gpt-4o", "deepseek-chat"
+    std::string base_url;            // API base URL, e.g. "https://api.openai.com/v1"
+    float temperature = 0.3f;
+    int max_tokens = 4096;
+    int timeout_seconds = 120;
+    bool is_default = false;         // Default provider to use
+};
+
+// ============================================================================
+// Repository list item (for discovery mode)
+// ============================================================================
+struct RepoInfo {
+    std::string name;                // e.g. "AI-PR-Reviewer"
+    std::string full_name;           // e.g. "oceanli010/AI-PR-Reviewer"
+    std::string description;
+    std::string language;
+    std::string default_branch;
+    std::string updated_at;
+    int stars = 0;
+    int open_issues = 0;
+    bool is_private = false;
+    bool is_fork = false;
+};
+
+// ============================================================================
+// PR list item (for discovery mode)
+// ============================================================================
+struct PrListItem {
+    int number = 0;
+    std::string title;
+    std::string author;
+    std::string created_at;
+    std::string updated_at;
+    std::string html_url;
+    std::string state;               // "open", "closed", "merged"
+    bool is_draft = false;
+};
+
+// ============================================================================
 // Application configuration
 // ============================================================================
 struct AppConfig {
@@ -120,7 +164,11 @@ struct AppConfig {
     std::string repo;
     int pr_number = 0;
 
-    // OpenAI settings
+    // AI Provider settings (multi-provider support)
+    std::vector<AiProvider> ai_providers;
+    int selected_provider_index = 0; // Index in ai_providers vector
+
+    // Legacy fields (used when no providers configured, or for CLI override)
     std::string openai_api_key;
     std::string openai_model = "gpt-4o";
     std::string openai_base_url = "https://api.openai.com/v1";
@@ -131,9 +179,15 @@ struct AppConfig {
     // GitHub settings
     std::string github_token;
 
+    // Discovery mode settings
+    bool discover_mode = false;      // Interactive repo/PR discovery
+    bool list_repos = false;         // List accessible repositories
+    std::string repo_filter;          // Filter repos by name pattern
+    std::string pr_state_filter = "open"; // open, closed, all
+
     // Output settings
     std::string output_path = "review-report.html";
-    std::string template_path;     // Custom HTML template path
+    std::string template_path;       // Custom HTML template path
 
     // Runtime settings
     bool verbose = false;
@@ -144,6 +198,30 @@ struct AppConfig {
 
     // Config file path
     std::string config_file;
+
+    // Helper: get the active AI provider (fallback to legacy fields)
+    AiProvider active_provider() const {
+        if (!ai_providers.empty() && selected_provider_index >= 0 &&
+            selected_provider_index < static_cast<int>(ai_providers.size())) {
+            AiProvider p = ai_providers[selected_provider_index];
+            // Apply CLI overrides if legacy fields are set
+            if (!openai_api_key.empty()) p.api_key = openai_api_key;
+            if (!openai_model.empty() && openai_model != "gpt-4o") p.model = openai_model;
+            if (!openai_base_url.empty() && openai_base_url != "https://api.openai.com/v1")
+                p.base_url = openai_base_url;
+            return p;
+        }
+        // Legacy mode: construct provider from flat fields
+        AiProvider legacy;
+        legacy.name = "OpenAI (legacy)";
+        legacy.api_key = openai_api_key;
+        legacy.model = openai_model;
+        legacy.base_url = openai_base_url;
+        legacy.temperature = temperature;
+        legacy.max_tokens = max_tokens;
+        legacy.timeout_seconds = context_timeout_seconds;
+        return legacy;
+    }
 };
 
 } // namespace ai_pr_reviewer
