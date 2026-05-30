@@ -274,6 +274,31 @@ int main(int argc, char* argv[]) {
     spdlog::set_level(spdlog::level::info);
     spdlog::set_pattern("%^[%L]%$ %v");
 
+    // Check for vcpkg proxy artifact that can break GitHub API calls
+    const char* proxy = std::getenv("HTTP_PROXY");
+    if (proxy) {
+        std::string ps(proxy);
+        if (ps.find("127.0.0.1:7890") != std::string::npos || ps.find("localhost") != std::string::npos) {
+            spdlog::warn("HTTP_PROXY={} detected (likely vcpkg artifact)", ps);
+            spdlog::warn("If GitHub API calls fail, unset it: $env:HTTP_PROXY=$null");
+        }
+    }
+
+    // No arguments: show friendly banner and exit gracefully (prevents flash-close)
+    if (argc <= 1) {
+        print_header();
+        std::cout << "  This is a command-line tool. Please run from a terminal:\n\n";
+        std::cout << "    ai-pr-reviewer --help              Show all options\n";
+        std::cout << "    ai-pr-reviewer --discover          Browse repos and PRs\n";
+        std::cout << "    ai-pr-reviewer --pr-url <URL>      Analyze a specific PR\n\n";
+        std::cout << "  Quick start:\n";
+        std::cout << "    set OPENAI_API_KEY=sk-your-key\n";
+        std::cout << "    ai-pr-reviewer --pr-url https://github.com/user/repo/pull/1\n\n";
+        std::cout << "  Press any key to exit...";
+        std::cin.get();
+        return 0;
+    }
+
     try {
         auto config = ai_pr_reviewer::ConfigManager::load(argc, argv);
         print_header();

@@ -19,7 +19,12 @@ using namespace web::http::client;
 // Constructor
 // ============================================================================
 GitHubClient::GitHubClient(const AppConfig& config)
-    : config_(config) {}
+    : config_(config) {
+    if (config_.github_token.empty()) {
+        spdlog::warn("No GitHub token configured - using anonymous access (60 req/h limit)");
+        spdlog::warn("Set GITHUB_TOKEN env var or add 'github.token' to config.yaml for 5000 req/h");
+    }
+}
 
 void GitHubClient::set_progress_callback(ProgressCallback callback) {
     progress_callback_ = std::move(callback);
@@ -209,7 +214,32 @@ std::string GitHubClient::http_get(const std::string& url) {
 
             // Not found
             if (status_code == 404) {
-                throw std::runtime_error("PR not found. Check owner/repo/number and access permissions.");
+                auto body = utility::conversions::to_utf8string(response.extract_string().get());
+                std::string detail = body;
+                if (detail.size() > 200) detail = detail.substr(0, 200) + "...";
+
+                // Build meaningful error with actionable suggestions
+                std::string msg = "GitHub API returned 404 for: " + url + "\n";
+                if (!detail.empty() && detail != "null") {
+                    msg += "Response: " + detail + "\n";
+                }
+                msg += "This usually means one of:\n";
+                msg += "  1. The PR/repo does not exist or is private\n";
+                msg += "  2. GitHub API rate limit exceeded (60 req/h for anonymous)\n";
+                msg += "  3. Network proxy interfering (vcpkg may set HTTP_PROXY)\n\n";
+
+                if (config_.github_token.empty()) {
+                    msg += "You are using ANONYMOUS access (no GitHub token). ";
+                    msg += "Add a token for 5000 req/h:\n";
+                    msg += "  --github-token ghp_xxx\n";
+                    msg += "  $env:GITHUB_TOKEN = 'ghp_xxx' (PowerShell)\n";
+                    msg += "  config.yaml 'github.token' field\n";
+                } else {
+                    msg += "Your GitHub token is set but the request failed. ";
+                    msg += "Check token permissions (needs 'repo' scope for private repos).\n";
+                }
+
+                throw std::runtime_error(msg);
             }
 
             // Other errors

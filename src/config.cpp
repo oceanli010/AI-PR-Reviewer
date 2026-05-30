@@ -8,6 +8,13 @@
 #include <regex>
 #include <stdexcept>
 #include <iostream>
+#include <fstream>
+#include <algorithm>
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace ai_pr_reviewer {
 
@@ -128,9 +135,43 @@ AppConfig ConfigManager::load(int argc, char* argv[]) {
         config.pr_number = pr_number;
     }
 
-    // --- Load config file if specified ---
+    // --- Load config file: explicit path > auto-search > skip ---
     if (!config.config_file.empty()) {
         load_from_file(config, config.config_file);
+    } else {
+        // Auto-search config.yaml in: exe dir > project root > CWD
+        std::vector<std::string> search_paths;
+
+        // 1. Executable directory
+#ifdef _WIN32
+        char exe_path[MAX_PATH];
+        DWORD len = GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
+        if (len > 0 && len < MAX_PATH) {
+            std::string exe_dir(exe_path, len);
+            auto last_slash = exe_dir.find_last_of("\\/");
+            if (last_slash != std::string::npos) {
+                exe_dir = exe_dir.substr(0, last_slash);
+                search_paths.push_back(exe_dir + "\\config.yaml");
+                // 2. Parent directory (project root when running from build/Release/)
+                auto penultimate = exe_dir.find_last_of("\\/", last_slash - 1);
+                if (penultimate != std::string::npos) {
+                    search_paths.push_back(exe_dir.substr(0, penultimate) + "\\config.yaml");
+                }
+            }
+        }
+#endif
+        // 3. Current working directory
+        search_paths.push_back("config.yaml");
+
+        for (const auto& path : search_paths) {
+            std::ifstream auto_cfg(path);
+            if (auto_cfg.good()) {
+                auto_cfg.close();
+                spdlog::debug("Auto-detected config: {}", path);
+                load_from_file(config, path);
+                break;
+            }
+        }
     }
 
     // --- Apply environment variable overrides ---
@@ -362,11 +403,21 @@ void ConfigManager::validate(AppConfig& config) {
     // Check required: API key (from provider or legacy)
     auto active = config.active_provider();
     if (active.api_key.empty()) {
+        std::string provider_hint;
+        if (!config.ai_providers.empty()) {
+            int idx = config.selected_provider_index;
+            if (idx >= 0 && idx < static_cast<int>(config.ai_providers.size())) {
+                provider_hint = " (active provider: " + config.ai_providers[idx].name +
+                                ", model: " + config.ai_providers[idx].model + ")";
+            }
+        }
         throw std::runtime_error(
-            "AI API key is required. Provide it via:\n"
+            "AI API key is required" + provider_hint + ".\n"
+            "Provide it via:\n"
             "  --api-key YOUR_KEY\n"
-            "  OPENAI_API_KEY environment variable\n"
-            "  config.yaml 'ai.providers[].api_key' or 'openai.api_key' field"
+            "  set OPENAI_API_KEY=YOUR_KEY    (environment variable on CMD)\n"
+            "  $env:OPENAI_API_KEY = 'YOUR_KEY'  (environment variable on PowerShell)\n"
+            "  Or fill api_key in config.yaml 'ai.providers[].api_key' field"
         );
     }
 
