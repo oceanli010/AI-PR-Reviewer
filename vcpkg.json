@@ -1,0 +1,49 @@
+{
+  "name": "ai-pr-reviewer",
+  "version": "1.0.0",
+  "description": "AI-powered Pull Request code review tool for Windows",
+  "homepage": "https://github.com/oceanli010/AI-PR-Reviewer",
+  "license": "MIT",
+  "builtin-baseline": "b21ff8f3cadbd8e0b175b49be2dd9202f1f208f4",
+  "dependencies": [
+    {
+      "name": "cli11",
+      "version>=": "2.6.2"
+    },
+    {
+      "name": "yaml-cpp",
+      "version>=": "0.9.0"
+    },
+    {
+      "name": "nlohmann-json",
+      "version>=": "3.12.0"
+    },
+    {
+      "name": "cpprestsdk",
+      "version>=": "2.10.19"
+    },
+    {
+      "name": "spdlog",
+      "version>=": "1.17.0"
+    },
+    {
+      "name": "inja",
+      "version>=": "3.5.0"
+    },
+    {
+      "name": "gtest",
+      "version>=": "1.17.0"
+    }
+  ],
+  "features": {
+    "tests": {
+      "description": "Build unit tests",
+      "dependencies": [
+        {
+          "name": "gtest",
+          "version>=": "1.17.0"
+        }
+      ]
+    }
+  }
+}
