@@ -4,6 +4,10 @@
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
 
+### 项目演示
+
+[![项目演示视频](https://img.shields.io/badge/Bilibili-演示视频-00A1D6?style=flat&logo=bilibili)](https://www.bilibili.com/video/BV1iNVJ6mEPh)
+
 **AI PR Reviewer** 是一个基于 AI 的 Pull Request 代码评审工具，帮助开发者提升代码审查的效率和代码质量。支持多 AI 模型切换（OpenAI/DeepSeek/本地模型等），可通过 GitHub Token 自动发现仓库和 PR，实现端到端的智能代码评审体验。
 
 ---
