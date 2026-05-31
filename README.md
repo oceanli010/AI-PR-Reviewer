@@ -21,7 +21,7 @@
 - **AI 智能分析** — 从安全、Bug、性能、风格等多维度分析代码
 - **批量处理** — 大 PR 自动拆分为多个批次进行分析，避免 token 超限
 - **风险代码识别** — 按严重程度（Critical/High/Medium/Low/Info）分类标注问题
-- **HTML 报告生成** — 基于 TDesign 设计规范的现代 HTML 评审报告，支持离线查看
+- **HTML 报告生成** — 受 TDesign 设计规范启发的现代 HTML 评审报告（纯内联 CSS，零 CDN 依赖，支持离线查看）
 - **灵活配置** — 支持 CLI 参数、环境变量、YAML 配置文件三种配置方式
 - **指数退避重试** — API 调用失败自动重试，提高可靠性
 
@@ -48,7 +48,7 @@
 │                                                ▼         │
 │                               ┌───────────────────────┐  │
 │                               │ HTML Report Generator │  │
-│                               │  (inja + TDesign CSS)  │  │
+│                               │  (inja + inline CSS)  │  │
 │                               └───────────┬───────────┘  │
 │                                           │              │
 │                                           ▼              │
@@ -65,7 +65,7 @@
 | GitHub Client | PR 元数据获取、仓库/PR 发现、文件 diff 下载 | cpprestsdk |
 | Diff Parser | Unified diff 解析、语言检测（40+ 语言） | C++ regex |
 | AI Analyzer | Prompt 构建、多模型 API 调用（兼容 OpenAI API）、结果解析 | cpprestsdk + nlohmann/json |
-| HTML Report | inja 模板渲染、Markdown 渲染、Diff 视图、TDesign 样式 | inja + 内联 CSS |
+| HTML Report | inja 模板渲染、Markdown 渲染、Diff 视图、内联 CSS（受 TDesign 启发，零 CDN） | inja + 内联 CSS |
 
 ---
 
@@ -75,12 +75,12 @@
 
 | 库 | 最低版本 | 用途 | 许可证 |
 |----|---------|------|--------|
-| **CLI11** | ≥ 2.4.0 | 命令行参数解析 | 3-Clause BSD |
-| **yaml-cpp** | ≥ 0.8.0 | YAML 配置文件解析 | MIT |
-| **nlohmann/json** | ≥ 3.11.0 | JSON 序列化/反序列化 | MIT |
-| **cpprestsdk** | ≥ 2.10.0 | HTTP 客户端（GitHub + OpenAI API） | MIT |
-| **spdlog** | ≥ 1.13.0 | 日志系统 | MIT |
-| **inja** | ≥ 3.4.0 | HTML 模板引擎 | MIT |
+| **CLI11** | ≥ 2.6.2 | 命令行参数解析 | 3-Clause BSD |
+| **yaml-cpp** | ≥ 0.9.0 | YAML 配置文件解析 | MIT |
+| **nlohmann/json** | ≥ 3.12.0 | JSON 序列化/反序列化 | MIT |
+| **cpprestsdk** | ≥ 2.10.19 | HTTP 客户端（GitHub + OpenAI API） | MIT |
+| **spdlog** | ≥ 1.17.0 | 日志系统 | MIT |
+| **inja** | ≥ 3.5.0 | HTML 模板引擎 | MIT |
 
 ### 构建与测试依赖
 
@@ -88,7 +88,7 @@
 |------|------|
 | **CMake** | ≥ 3.22 构建系统 |
 | **vcpkg** | C++ 包管理器（manifest 模式） |
-| **Google Test** | ≥ 1.14.0 单元测试框架 |
+| **Google Test** | ≥ 1.17.0 单元测试框架 |
 | **Visual Studio 2022** | Windows 编译工具链（MSVC） |
 
 ### 依赖冲突排查
@@ -102,6 +102,15 @@
 | CLI11 ↔ 所有库 | ✅ 兼容 | 纯头文件库 |
 
 **结论**: 所选依赖链无已知版本冲突，所有库均可通过 vcpkg 统一管理。
+
+### 外部服务依赖（运行时）
+
+以下外部 API 服务是程序运行的必要条件，需确保网络可达：
+
+| 服务 | 端点 | 用途 | 说明 |
+|------|------|------|------|
+| **GitHub REST API v3** | `https://api.github.com` | 获取 PR 元数据、文件 Diff、仓库/PR 列表 | 匿名访问限 60 次/小时，建议配置 GitHub Token 提升至 5000 次/小时 |
+| **OpenAI 兼容 API** | 可配置（默认 `https://api.openai.com/v1`） | AI 代码评审分析 | 支持任意兼容 `/v1/chat/completions` 端点的服务 |
 
 ---
 
@@ -353,6 +362,26 @@ AI-PR-Reviewer/
 5. **CI/CD 集成**: 提供 GitHub Actions / Jenkins 等 CI 插件，在流水线中自动执行
 6. **多平台支持**: 扩展至 GitLab、Bitbucket 等其他代码托管平台
 7. **GUI 界面**: 基于 Qt 或 Electron 开发图形化客户端
+
+---
+
+## 原创实现说明
+
+本项目所有核心功能均为独立开发实现，**未引入任何未声明的第三方库或框架**。以下功能模块为原创开发，不依赖第三方现成方案：
+
+| 功能模块 | 位置 | 实现说明 |
+|----------|------|----------|
+| **Unified Diff 解析器** | `src/diff_parser.cpp` | 基于 C++ `std::regex` 自研，支持 40+ 编程语言自动检测，逐行解析 Hunks 与行号映射 |
+| **Markdown → HTML 渲染器** | `src/html_report.cpp` (`markdown_to_html`) | 自研轻量级转换器，支持标题、列表、代码块、行内代码、链接、粗体等格式，无第三方 Markdown 库 |
+| **Diff 视图生成器** | `src/html_report.cpp` (`build_diff_data`) | 生成色彩编码的代码 Diff HTML 视图，支持添加/删除/上下文行的精确着色与截断 |
+| **HTML 报告模板** | `templates/report.html` + `src/html_report.cpp` 内置模板 | 受 TDesign 设计规范启发，全部采用内联 CSS，零外部 CDN 引用，完全可离线使用 |
+| **多 AI Provider 路由** | `src/ai_analyzer.cpp` + `src/config.cpp` | 支持通过配置文件热切换 OpenAI / DeepSeek / Azure / Ollama 等多种 AI 模型 |
+| **交互式发现模式** | `src/main.cpp` | 基于 GitHub Token 列出仓库与 PR 的终端交互界面，支持名称过滤和状态筛选 |
+| **配置自动发现** | `src/config.cpp` | 智能搜索 exe 目录 → 上级目录 → 当前工作目录，自动加载配置文件 |
+| **指数退避重试** | `src/ai_analyzer.cpp` + `src/github_client.cpp` | API 调用失败后的自动重试机制，配合递增延迟策略 |
+| **Prompt 工程** | `src/ai_analyzer.cpp` | 精心设计的系统 Prompt，定义五级严重度标准和多维度评审框架 |
+
+> HTML 模板 HTML/CSS 均为手写实现，未使用 Bootstrap、Tailwind、TDesign 等第三方 CSS 框架库。
 
 ---
 
